@@ -218,9 +218,15 @@ export default {
     _currentChanged (current, history) {
       var source = this.currentChangeSource
       this.currentChangeSource = ''
-      if (!source) {
-        const length = this.items.length
-        this._animateViewport(current, '', this.circularEnabled && history + (length - current) % length > length / 2 ? 1 : 0)
+      if(!source) {
+        const {length} = this.items;
+        const newCurrent = current + length;
+        const next = (newCurrent - history) % length;
+        const newHistory = history + length;
+        const prev =  (newHistory - current) % length;
+        const n = prev < next ? 0 : 1;
+
+        this._animateViewport(current, '', n);
       }
       var item = this.items[current]
       if (item) {
