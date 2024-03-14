@@ -3,6 +3,23 @@ import {
 } from 'uni-shared'
 import emitter from './emitter'
 
+let resetTimer
+let isAndroid
+let osVersion
+let keyboardHeight
+let keyboardChangeCallback
+let webviewStyle
+if (__PLATFORM__ === 'app-plus') {
+  plusReady(() => {
+    isAndroid = plus.os.name.toLowerCase() === 'android'
+    osVersion = plus.os.version
+  })
+  document.addEventListener('keyboardchange', function (event) {
+    keyboardHeight = event.height
+    keyboardChangeCallback && keyboardChangeCallback()
+  }, false)
+}
+
 /**
  * 保证iOS点击输入框外隐藏键盘
  */
@@ -14,7 +31,8 @@ function setSoftinputTemporary (vm, reset) {
     const MODE_ADJUSTPAN = 'adjustPan'
     const MODE_NOTHING = 'nothing'
     const currentWebview = plus.webview.currentWebview()
-    const style = currentWebview.getStyle() || {}
+    // iOS 14.6 调用同步方法导致键盘弹卡顿
+    const style = webviewStyle || currentWebview.getStyle() || {}
     const options = {
       mode: (reset || style.softinputMode === MODE_ADJUSTRESIZE) ? MODE_ADJUSTRESIZE : (vm.adjustPosition ? MODE_ADJUSTPAN : MODE_NOTHING),
       position: {
@@ -63,22 +81,6 @@ function resetSoftinputNavBar (vm) {
   }
 }
 
-let resetTimer
-let isAndroid
-let osVersion
-let keyboardHeight
-let keyboardChangeCallback
-if (__PLATFORM__ === 'app-plus') {
-  plusReady(() => {
-    isAndroid = plus.os.name.toLowerCase() === 'android'
-    osVersion = plus.os.version
-  })
-  document.addEventListener('keyboardchange', function (event) {
-    keyboardHeight = event.height
-    keyboardChangeCallback && keyboardChangeCallback()
-  }, false)
-}
-
 export default {
   name: 'Keyboard',
   mixins: [emitter],
@@ -98,6 +100,11 @@ export default {
     autoBlur: {
       type: [Boolean, String],
       default: false
+    }
+  },
+  computed: {
+    isApple () {
+      return String(navigator.vendor).indexOf('Apple') === 0
     }
   },
   directives: {
@@ -146,18 +153,29 @@ export default {
 
       if (__PLATFORM__ === 'app-plus') {
         // 安卓单独隐藏键盘后点击输入框不会触发 focus 事件
-        el.addEventListener('click', () => {
-          if (!this.disabled && focus && keyboardHeight === 0) {
-            setSoftinputTemporary(this)
-          }
-        })
-        if (!isAndroid && parseInt(osVersion) < 12) {
-          // iOS12 以下系统 focus 事件设置较迟，改在 touchstart 设置
-          el.addEventListener('touchstart', () => {
-            if (!this.disabled && !focus) {
+        if (isAndroid) {
+          el.addEventListener('click', () => {
+            if (!this.disabled && focus && keyboardHeight === 0) {
               setSoftinputTemporary(this)
             }
           })
+        }
+        if (!isAndroid) {
+          // iOS12 以下系统 focus 事件设置较迟，改在 touchstart 设置
+          if (parseInt(osVersion) < 12) {
+            el.addEventListener('touchstart', () => {
+              if (!this.disabled && !focus) {
+                setSoftinputTemporary(this)
+              }
+            })
+          }
+          // iOS 14.6 调用同步方法导致键盘弹卡顿
+          if (parseFloat(osVersion) >= 14.6 && !webviewStyle) {
+            plusReady(() => {
+              const currentWebview = plus.webview.currentWebview()
+              webviewStyle = currentWebview.getStyle() || {}
+            })
+          }
         }
       }
 
@@ -182,12 +200,17 @@ export default {
         }
 
         // 修复ios端显示与点击位置错位的Bug by:wyq
-        if (String(navigator.vendor).indexOf('Apple') === 0) {
+        if (this.isApple) {
           document.documentElement.scrollTo(document.documentElement.scrollLeft, document.documentElement.scrollTop)
         }
       }
 
       el.addEventListener('blur', () => {
+        // 在iOS设备上，手动调用uni.hideKeyboard()，键盘收起并且触发blur，但实际并没有blur。
+        // 此时如果再点击页面其他地方会重新聚焦，此处做处理
+        if (this.isApple) {
+          el.blur()
+        }
         focus = false
         onKeyboardHide()
       })

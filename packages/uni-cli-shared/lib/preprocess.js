@@ -1,9 +1,15 @@
 const DEFAULT_KEYS = [
+  'UNI-APP-X',
+  'VUE2',
+  'VUE3',
   'MP',
   'APP',
   'APP-PLUS-NVUE',
   'APP-VUE',
-  'APP-NVUE'
+  'APP-NVUE',
+  'APP-ANDROID',
+  'APP-IOS',
+  'WEB'
 ]
 
 function normalize (name) {
@@ -16,6 +22,8 @@ module.exports = function initPreprocess (name, platforms, userDefines = {}) {
 
   const defaultContext = {}
 
+  defaultContext.uniVersion = parseFloat(process.env.UNI_COMPILER_VERSION) || 0
+
   const userDefineKeys = Object.keys(userDefines)
 
   platforms
@@ -25,6 +33,15 @@ module.exports = function initPreprocess (name, platforms, userDefines = {}) {
       defaultContext[normalize(name)] = false
     })
 
+  if (process.env.UNI_USING_VUE3) {
+    defaultContext.VUE3 = true
+  } else {
+    defaultContext.VUE2 = true
+  }
+  // nvue 只支持vue2
+  nvueContext.VUE2 = true
+  nvueContext.VUE3 = false
+
   vueContext[normalize(name)] = true
 
   if (name === 'app-plus') {
@@ -33,14 +50,26 @@ module.exports = function initPreprocess (name, platforms, userDefines = {}) {
     nvueContext.APP_PLUS = true
     nvueContext.APP_NVUE = true
     nvueContext.APP_PLUS_NVUE = true
-  }
 
+    if (process.env.UNI_APP_PLATFORM === 'android') {
+      defaultContext.APP_ANDROID = true
+    } else if (process.env.UNI_APP_PLATFORM === 'ios') {
+      defaultContext.APP_IOS = true
+    } else {
+      defaultContext.APP_ANDROID = true
+      defaultContext.APP_IOS = true
+    }
+  }
+  if (name === 'h5') {
+    defaultContext.WEB = true
+  }
   if (name.startsWith('mp-')) {
     vueContext.MP = true
   }
 
   if (name.startsWith('app-')) {
     vueContext.APP = true
+    nvueContext.APP = true
   }
 
   if (name === 'quickapp-webview') {

@@ -1,6 +1,11 @@
 const path = require('path')
+const fs = require('fs')
 const hash = require('hash-sum')
 const crypto = require('crypto')
+const escapeStringRegexp = require('escape-string-regexp')
+const escapeGlob = require('glob-escape')
+const webpack = require('webpack')
+const uniI18n = require('@dcloudio/uni-cli-i18n')
 
 const isWin = /^win/.test(process.platform)
 
@@ -13,6 +18,24 @@ try {
 
 const isInHBuilderX = !!aboutPkg
 const isInHBuilderXAlpha = !!(isInHBuilderX && aboutPkg.alpha)
+
+function getCLIContext () {
+  var context = path.resolve(__dirname, '../../../../')
+  // const isInHBuilderX = fs.existsSync(path.resolve(context, 'bin/uniapp-cli.js'))
+  if (isInHBuilderX) {
+    return context
+  }
+  const pnpmFind = __dirname.match(/.+?[/\\].pnpm[/\\]/)
+  if (pnpmFind) {
+    const pnpm = pnpmFind[0]
+    context = path.resolve(pnpm, '../../')
+  }
+  const isInCLI = fs.existsSync(path.resolve(context, './src'))
+  if (isInCLI) {
+    return context
+  }
+  return process.cwd()
+}
 
 function removeExt (str, ext) {
   if (ext) {
@@ -102,9 +125,94 @@ function normalizeNodeModules (str) {
 
 const _hasOwnProperty = Object.prototype.hasOwnProperty
 
+/**
+ * pathToRegexp
+ * @param {string} pathString
+ * @param {{start:?boolean,end:?boolean,global:?boolean}?} options
+ * @returns {RegExp}
+ */
+function pathToRegexp (pathString, options = {}) {
+  return new RegExp((options.start ? '^' : '') + escapeStringRegexp(pathString) + (options.end ? '$' : ''), 'i' + (options.global ? 'g' : ''))
+}
+
+/**
+ * pathToGlob
+ * @param {string} pathString
+ * @param {string} glob
+ * @param {{windows:?boolean,escape:?boolean}?} options
+ * @returns {string}
+ */
+function pathToGlob (pathString, glob, options = {}) {
+  const isWindows = 'windows' in options ? options.windows : /^win/.test(process.platform)
+  const useEscape = options.escape
+  const str = isWindows ? pathString.replace(/\\/g, '/') : pathString
+  let safeStr = escapeGlob(str)
+  if (isWindows || !useEscape) {
+    safeStr = safeStr.replace(/\\(.)/g, '[$1]')
+  }
+  return path.posix.join(safeStr, glob)
+}
+/**
+ * 字节跳动小程序可以配置 ext:// 开头的插件页面模板，如 ext://microapp-trade-plugin/order-confirm
+ * @param pagePath
+ * @returns
+ */
+function isNormalPage (pagePath) {
+  return !pagePath.startsWith('ext://')
+}
+
+function createSource (content) {
+  return webpack.version[0] > 4 ? new webpack.sources.RawSource(content) : {
+    size () {
+      return Buffer.byteLength(content, 'utf8')
+    },
+    source () {
+      return content
+    }
+  }
+}
+
+function deleteAsset (compilation, name) {
+  if ('deleteAsset' in compilation) {
+    compilation.deleteAsset(name)
+  } else {
+    delete compilation.assets[name]
+  }
+}
+
+/**
+ * cli 项目增加运行方式提示 https://ask.dcloud.net.cn/question/165071
+ * App 端存在多次编译问题(vue 2 nvue 3)，故做防抖处理
+ * @param delay
+ * @returns
+ */
+let runPromptTimer = null
+function showRunPrompt (delay = 300) {
+  if (runPromptTimer) {
+    clearTimeout(runPromptTimer)
+  }
+  runPromptTimer = setTimeout(() => {
+    if (!isInHBuilderX) {
+      const chalk = require('chalk')
+      const outputDir = path.relative(
+        process.env.UNI_CLI_CONTEXT,
+        process.env.UNI_OUTPUT_DIR
+      )
+      const platform = process.env.UNI_PLATFORM.startsWith('quickapp-webview') && process.env.UNI_SUB_PLATFORM ? process.env.UNI_SUB_PLATFORM : process.env.UNI_PLATFORM
+      console.log(uniI18n.__('prompt.run.message', {
+        devtools: uniI18n.__(`prompt.run.devtools.${platform}`),
+        outputDir: chalk.cyan(outputDir)
+      }))
+    }
+    runPromptTimer = null
+  }, delay)
+}
+
 module.exports = {
+  isNormalPage,
   isInHBuilderX,
   isInHBuilderXAlpha,
+  getCLIContext,
   normalizeNodeModules,
   md5,
   hasOwn (obj, key) {
@@ -129,6 +237,8 @@ module.exports = {
   hyphenate,
   normalizePath,
   convertStaticStyle,
+  pathToRegexp,
+  pathToGlob,
   getComponentName: cached((str) => {
     if (str.indexOf('wx-') === 0) {
       return str.replace('wx-', 'weixin-')
@@ -137,5 +247,8 @@ module.exports = {
   }),
   getTemplatePath () {
     return path.join(__dirname, '../template')
-  }
+  },
+  createSource,
+  deleteAsset,
+  showRunPrompt
 }

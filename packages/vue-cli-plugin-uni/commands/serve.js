@@ -37,7 +37,7 @@ module.exports = (api, options) => {
 
     const url = require('url')
     const path = require('path')
-    const chalk = require('chalk')
+    const { chalk } = require('@vue/cli-shared-utils')
     const webpack = require('webpack')
     const WebpackDevServer = require('webpack-dev-server')
     const portfinder = require('portfinder')
@@ -139,48 +139,98 @@ module.exports = (api, options) => {
     const compiler = webpack(webpackConfig)
 
     // create server
-    const server = new WebpackDevServer(compiler, Object.assign({
-      clientLogLevel: 'none',
-      historyApiFallback: {
-        disableDotRule: true,
-        rewrites: [{
-          from: /./,
-          to: path.posix.join(options.publicPath, 'index.html')
-        }]
-      },
-      contentBase: api.resolve('public'),
-      watchContentBase: !isProduction,
-      hot: !isProduction,
-      quiet: true,
-      compress: isProduction,
-      publicPath: options.publicPath,
-      overlay: isProduction // TODO disable this
-        ? false : {
-          warnings: false,
-          errors: true
+    let server
+    if (webpack.version[0] > 4) {
+      server = new WebpackDevServer(Object.assign({
+        historyApiFallback: {
+          disableDotRule: true,
+          rewrites: [{
+            from: /./,
+            to: path.posix.join(options.publicPath, 'index.html')
+          }]
+        },
+        hot: !isProduction,
+        compress: isProduction,
+        static: {
+          directory: api.resolve('public'),
+          publicPath: options.publicPath,
+          watch: !isProduction,
+          ...projectDevServerOptions.static
+        },
+        client: {
+          logging: 'none',
+          overlay: isProduction // TODO disable this
+            ? false
+            : { warnings: false, errors: true },
+          progress: !process.env.VUE_CLI_TEST,
+          ...projectDevServerOptions.client
         }
-    }, projectDevServerOptions, {
-      https: useHttps,
-      proxy: proxySettings,
-      before (app, server) {
+      }, projectDevServerOptions, {
+        https: useHttps,
+        proxy: proxySettings,
+        setupMiddlewares (middlewares, devServer) {
+          // launch editor support.
+          // this works with vue-devtools & @vue/cli-overlay
+          devServer.app.use('/__open-in-editor', launchEditorMiddleware(() => console.log(
+            'To specify an editor, specify the EDITOR env variable or ' +
+            'add "editor" field to your Vue project config.\n'
+          )))
+
+          // allow other plugins to register middlewares, e.g. PWA
+          // todo: migrate to the new API interface
+          api.service.devServerConfigFns.forEach(fn => fn(devServer.app, devServer))
+
+          if (projectDevServerOptions.setupMiddlewares) {
+            return projectDevServerOptions.setupMiddlewares(middlewares, devServer)
+          }
+
+          return middlewares
+        }
+      }), compiler)
+    } else {
+      server = new WebpackDevServer(compiler, Object.assign({
+        clientLogLevel: 'none',
+        historyApiFallback: {
+          disableDotRule: true,
+          rewrites: [{
+            from: /./,
+            to: path.posix.join(options.publicPath, 'index.html')
+          }]
+        },
+        contentBase: api.resolve('public'),
+        watchContentBase: !isProduction,
+        hot: !isProduction,
+        quiet: true,
+        compress: isProduction,
+        publicPath: options.publicPath,
+        overlay: isProduction // TODO disable this
+          ? false : {
+            warnings: false,
+            errors: true
+          }
+      }, projectDevServerOptions, {
+        https: useHttps,
+        proxy: proxySettings,
+        before (app, server) {
         // launch editor support.
         // this works with vue-devtools & @vue/cli-overlay
-        app.use('/__open-in-editor', launchEditorMiddleware(() => console.log(
-          'To specify an editor, sepcify the EDITOR env variable or ' +
+          app.use('/__open-in-editor', launchEditorMiddleware(() => console.log(
+            'To specify an editor, sepcify the EDITOR env variable or ' +
           'add "editor" field to your Vue project config.\n'
-        )))
-        // allow other plugins to register middlewares, e.g. PWA
-        api.service.devServerConfigFns.forEach(fn => fn(app, server))
-        // apply in project middlewares
-        projectDevServerOptions.before && projectDevServerOptions.before(app,
-          server)
-      }
-    }))
+          )))
+          // allow other plugins to register middlewares, e.g. PWA
+          api.service.devServerConfigFns.forEach(fn => fn(app, server))
+          // apply in project middlewares
+          projectDevServerOptions.before && projectDevServerOptions.before(app,
+            server)
+        }
+      }))
+    }
 
     ;
     ['SIGINT', 'SIGTERM'].forEach(signal => {
       process.on(signal, () => {
-        server.close(() => {
+        server[webpack.version[0] > 4 ? 'stopCallback' : 'close'](() => {
           process.exit(0)
         })
       })
@@ -192,7 +242,7 @@ module.exports = (api, options) => {
       process.stdin.on('data', data => {
         if (data.toString() === 'close') {
           console.log('got close signal!')
-          server.close(() => {
+          server[webpack.version[0] > 4 ? 'stopCallback' : 'close'](() => {
             process.exit(0)
           })
         }
@@ -260,11 +310,6 @@ module.exports = (api, options) => {
           isFirstCompile = false
 
           if (!isProduction) {
-            if (process.UNI_CLOUD) {
-              console.warn(
-                '当前项目使用了uniCloud，为避免云函数调用跨域问题，建议在HBuilderX内置浏览器里调试，如使用外部浏览器需处理跨域，详见：https://uniapp.dcloud.io/uniCloud/quickstart?id=useinh5'
-              )
-            }
             // const buildCommand = hasProjectYarn(api.getCwd()) ? `yarn build` : `npm run build`
             // console.log(`  Note that the development build is not optimized.`)
             // console.log(`  To create a production build, run ${chalk.cyan(buildCommand)}.`)
@@ -308,11 +353,15 @@ module.exports = (api, options) => {
         server.showStatus = function () {}
       }
 
-      server.listen(port, host, err => {
-        if (err) {
-          reject(err)
-        }
-      })
+      if (webpack.version[0] > 4) {
+        server.start().catch(err => reject(err))
+      } else {
+        server.listen(port, host, err => {
+          if (err) {
+            reject(err)
+          }
+        })
+      }
     })
   })
 }

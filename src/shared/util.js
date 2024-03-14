@@ -5,6 +5,8 @@ const _completeValue = value => {
   return value > 9 ? value : ('0' + value)
 }
 
+export const extend = Object.assign
+
 export function isFn (fn) {
   return typeof fn === 'function'
 }
@@ -12,6 +14,8 @@ export function isFn (fn) {
 export function isStr (str) {
   return typeof str === 'string'
 }
+
+export const isString = isStr
 
 export function isObject (obj) {
   return obj !== null && typeof obj === 'object'
@@ -192,4 +196,16 @@ export function deepClone (vnodes, createElement) {
   }
 
   return vnodes.map(cloneVNode)
+}
+
+export * from './uni-id-mixin'
+
+export function sortObject (obj) {
+  const sortObj = {}
+  if (isPlainObject(obj)) {
+    Object.keys(obj).sort().forEach(key => {
+      sortObj[key] = obj[key]
+    })
+  }
+  return !Object.keys(sortObj) ? obj : sortObj
 }

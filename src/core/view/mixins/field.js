@@ -62,12 +62,20 @@ export default {
     selectionEnd: {
       type: [Number, String],
       default: -1
+    },
+    confirmHold: {
+      type: Boolean,
+      default: false
+    },
+    ignoreCompositionEvent: {
+      type: Boolean,
+      default: true
     }
   },
   data () {
     return {
       composing: false,
-      valueSync: this._getValueString(this.value),
+      valueSync: this._getValueString(this.value, this.type),
       focusSync: this.focus,
       // Safari 14 以上修正禁用状态颜色
       fixColor: String(navigator.vendor).indexOf('Apple') === 0 && CSS.supports('image-orientation:from-image')
@@ -113,10 +121,11 @@ export default {
   },
   created () {
     const valueChange = this.__valueChange = debounce((val) => {
-      this.valueSync = this._getValueString(val)
+      this.valueSync = this._getValueString(val, this.type)
     }, 100)
     this.$watch('value', valueChange)
     this.__triggerInput = throttle(($event, detail) => {
+      this.__valueChange.cancel()
       this.$emit('update:value', detail.value)
       this.$trigger('input', $event, detail)
     }, 100)
@@ -140,14 +149,19 @@ export default {
     }
   },
   methods: {
-    _getValueString (value) {
+    _getValueString (value, type) {
+      if (type === 'number' && isNaN(Number(value))) {
+        value = ''
+      }
       return value === null ? '' : String(value)
     },
     _initField (el) {
       this._field = el
       startTime = startTime || Date.now()
       if (this.needFocus) {
-        this._focus()
+        setTimeout(() => {
+          this._focus()
+        })
       }
     },
     _focus () {
@@ -194,20 +208,31 @@ export default {
         this._onInput($event, true)
       }
       this.focusSync = false
+      const field = $event.target
+      let cursor
+      if (field.type === 'number') {
+        field.type = 'text'
+        cursor = field.selectionEnd
+        field.type = 'number'
+      } else {
+        cursor = field.selectionEnd
+      }
       this.$trigger('blur', $event, {
         value: this.valueSync,
-        cursor: $event.target.selectionEnd
+        cursor
       })
     },
     _checkSelection () {
-      if (this.focusSync && this.selectionStartNumber > -1 && this.selectionEndNumber > -1) {
-        this._field.selectionStart = this.selectionStartNumber
-        this._field.selectionEnd = this.selectionEndNumber
+      const field = this._field
+      if (this.focusSync && this.selectionStartNumber > -1 && this.selectionEndNumber > -1 && field.type !== 'number') {
+        field.selectionStart = this.selectionStartNumber
+        field.selectionEnd = this.selectionEndNumber
       }
     },
     _checkCursor () {
-      if (this.focusSync && this.selectionStartNumber < 0 && this.selectionEndNumber < 0 && this.cursorNumber > -1) {
-        this._field.selectionEnd = this._field.selectionStart = this.cursorNumber
+      const field = this._field
+      if (this.focusSync && this.selectionStartNumber < 0 && this.selectionEndNumber < 0 && this.cursorNumber > -1 && field.type !== 'number') {
+        field.selectionEnd = field.selectionStart = this.cursorNumber
       }
     }
   }

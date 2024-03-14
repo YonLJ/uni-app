@@ -4,6 +4,7 @@ const t = require('@babel/types')
 const babelTraverse = require('@babel/traverse').default
 
 const generate = require('./generate')
+const uniI18n = require('@dcloudio/uni-cli-i18n')
 
 const {
   genCode,
@@ -14,7 +15,8 @@ const {
 } = require('../util')
 
 const {
-  ATTE_DATA_CUSTOM_HIDDEN
+  ATTR_DATA_CUSTOM_HIDDEN,
+  ATTR_SLOT_ORIGIN
 } = require('../constants')
 
 module.exports = function traverse (ast, state = {}) {
@@ -118,9 +120,9 @@ function traverseConditionalExpr (conditionalExprNode, state) {
   }]
   if (
     !(
-      t.isCallExpression(conditionalExprNode.alternate) &&
-      t.isIdentifier(conditionalExprNode.alternate.callee) &&
-      conditionalExprNode.alternate.callee.name === '_e'
+      (t.isCallExpression(conditionalExprNode.alternate) &&
+        t.isIdentifier(conditionalExprNode.alternate.callee) &&
+        conditionalExprNode.alternate.callee.name === '_e') || t.isNullLiteral(conditionalExprNode.alternate)
     )
   ) {
     // test?_c():_e()
@@ -230,10 +232,10 @@ function traverseDataNode (dataNode, state, node) {
                   let key
                   // 自定义组件不支持 hidden 属性
                   const platform = state.options.platform.name
-                  const platforms = ['mp-weixin', 'mp-qq', 'mp-toutiao']
+                  const platforms = ['mp-weixin', 'mp-qq', 'mp-jd', 'mp-xhs', 'mp-toutiao', 'mp-lark']
                   if (isComponent(node.type) && platforms.includes(platform)) {
-                    // 字节跳动小程序自定义属性不会反应在DOM上，只能使用事件格式
-                    key = `${platform === 'mp-toutiao' ? 'bind:-' : ''}${ATTE_DATA_CUSTOM_HIDDEN}`
+                    // 字节跳动|飞书小程序自定义属性不会反应在DOM上，只能使用事件格式
+                    key = `${platform === 'mp-toutiao' || platform === 'mp-lark' ? 'bind:-' : ''}${ATTR_DATA_CUSTOM_HIDDEN}`
                   } else {
                     key = 'hidden'
                   }
@@ -269,7 +271,7 @@ function traverseArrayExpression (arrayExprNodes, state) {
   }, [])
 }
 
-function genSlotNode (slotName, slotNode, fallbackNodes, state) {
+function genSlotNode (slotName, slotNode, fallbackNodes, state, isStaticSlotName = true) {
   if (!fallbackNodes || t.isNullLiteral(fallbackNodes)) {
     return slotNode
   }
@@ -281,7 +283,8 @@ function genSlotNode (slotName, slotNode, fallbackNodes, state) {
   return [{
     type: 'block',
     attr: {
-      [prefix + 'if']: '{{$slots.' + slotName + '}}'
+      // 移除动态拼接的 index 部分
+      [prefix + 'if']: isStaticSlotName ? '{{$slots.' + slotName + '}}' : '{{$slots[' + slotName.replace(/^{{/, '').replace(/}}$/, '').replace(/\+\('\.'\+\S+?\)$/, '') + ']}}'
     },
     children: [].concat(slotNode)
   }, {
@@ -296,25 +299,34 @@ function genSlotNode (slotName, slotNode, fallbackNodes, state) {
 }
 
 function traverseRenderSlot (callExprNode, state) {
-  if (!t.isStringLiteral(callExprNode.arguments[0])) {
-    state.errors.add('v-slot 不支持动态插槽名')
-    return
-  }
-
-  const slotName = callExprNode.arguments[0].value
+  const slotNameNode = callExprNode.arguments[0]
+  const isStaticSlotName = t.isStringLiteral(slotNameNode)
+  const slotName = isStaticSlotName ? slotNameNode.value : genCode(slotNameNode)
 
   let deleteSlotName = false // 标记是否组件 slot 手动指定了 name="default"
-  if (!state.options.betterScopedSlots && callExprNode.arguments.length > 2) { // 作用域插槽
+  if (state.options.scopedSlotsCompiler !== 'augmented' && callExprNode.arguments.length > 2) { // 作用域插槽
     const props = {}
-    callExprNode.arguments[2].properties.forEach(property => {
-      props[property.key.value] = genCode(property.value)
-    })
+    const arg2 = callExprNode.arguments[2]
+    const arg3 = callExprNode.arguments[3]
+    let bindings
+    if (t.isObjectExpression(arg2)) {
+      arg2.properties.forEach(property => {
+        props[property.key.value] = genCode(property.value)
+      })
+    } else if (arg3) {
+      bindings = genCode(arg3)
+    }
     deleteSlotName = props.SLOT_DEFAULT && Object.keys(props).length === 1
     if (!deleteSlotName) {
+      // TODO 非原生支持作用域插槽的平台在未启用增强的模式下也允许使用动态插槽名
+      if (!isStaticSlotName && !['mp-baidu', 'mp-alipay'].includes(state.options.platform.name)) {
+        state.errors.add(uniI18n.__('templateCompiler.notSupportDynamicSlotName', { 0: 'v-slot' }))
+        return
+      }
       delete props.SLOT_DEFAULT
       return genSlotNode(
         slotName,
-        state.options.platform.createScopedSlots(slotName, props, state),
+        state.options.platform.createScopedSlots(slotName, bindings || props, state),
         callExprNode.arguments[1],
         state
       )
@@ -333,28 +345,103 @@ function traverseRenderSlot (callExprNode, state) {
     delete node.attr.name
   }
 
-  return genSlotNode(slotName, node, callExprNode.arguments[1], state)
+  return genSlotNode(slotName, node, callExprNode.arguments[1], state, isStaticSlotName)
 }
 
 function traverseResolveScopedSlots (callExprNode, state) {
-  function single (children, slotName, ignore) {
-    if (Array.isArray(children) && children.length === 1) {
-      const child = children[0]
-      if (!child.type) {
-        return
-      }
-      if (ignore.includes(child.type)) {
-        return single(child.children, slotName, ignore)
-      }
-      child.attr = child.attr || {}
-      child.attr.slot = slotName
-      return true
+  const options = state.options
+  const prefix = options.platform.directive
+  const platformName = options.platform.name
+  const vIfAttrName = prefix + 'if'
+  const vForAttrName = prefix + 'for'
+  // 模板标签支持 slot 属性的平台
+  // 百度、字节小程序仅支持在根节点使用 slot 属性
+  const supportTemplateSlotPlatforms = ['mp-baidu', 'mp-toutiao']
+  // 支持访问当前节点 v-for 作用域的平台
+  const supportCurrentScopePlatforms = ['mp-weixin', 'mp-alipay']
+  function merge (node, ignore, vIfs = [], top, needRealNode) {
+    if (!top) {
+      // 支付宝小程序使用静态插槽时可以在非实体节点使用 slot 属性，其他小程序 named slot 需移动到实体节点
+      const slot = node.attr.slot
+      needRealNode = slot && slot !== 'default' && !supportTemplateSlotPlatforms.includes(platformName) && !(platformName === 'mp-alipay' && !/\{\{.+?\}\}/.test(slot))
+      node = { children: [node] }
+      top = node
     }
+    let children = node.children
+    let nodeAttr = node.attr || {}
+    function resolveVIf () {
+      if (vIfs.length) {
+        // 简易合并
+        nodeAttr[vIfAttrName] = vIfs.length > 1 ? `{{${vIfs.map(str => str.replace(/^\{\{(.+)\}\}$/, '($1)')).join('&&')}}}` : vIfs[0]
+        vIfs.length = 0
+      }
+    }
+    if (Array.isArray(children)) {
+      children = children.filter(child => !!child)
+      let slotNode
+      if (children.length === 1) {
+        let child = children[0]
+        if (child.type) {
+          const attr = child.attr || {}
+          // 除 v-if 外与父节点无同名属性且当前节点无 v-for 作用域且父节点 v-for 支持访问当前节点作用域，向上合并
+          // TODO 父节点访问变量不与当前 v-for 作用域内变量同名时，可向上合并
+          if (!Object.keys(attr).find(key => key !== vIfAttrName && key in nodeAttr) && !attr[vForAttrName] && (supportCurrentScopePlatforms.includes(platformName) || !nodeAttr[vForAttrName])) {
+            if (attr[vIfAttrName]) {
+              vIfs.push(attr[vIfAttrName])
+              delete attr[vIfAttrName]
+            }
+            child.attr = nodeAttr = Object.assign(attr, nodeAttr)
+            for (const key in child) {
+              node[key] = child[key]
+            }
+            child = node
+          } else {
+            resolveVIf()
+          }
+          if (ignore.includes(child.type)) {
+            return merge(child, ignore, vIfs, top, needRealNode)
+          } else if (needRealNode) {
+            slotNode = child
+          }
+        } else if (needRealNode) {
+          node.type = 'text'
+          slotNode = node
+        }
+      } else if (needRealNode) {
+        // TODO 依据子节点类型
+        node.type = 'view'
+        slotNode = node
+      }
+      if (slotNode && slotNode !== top) {
+        // TODO 多层 v-for 嵌套时，此处理导致作用域发生变化，需安全重命名 slot name
+        ['slot', 'slot-scope'].forEach(key => {
+          const topAttr = top.attr
+          if (key in topAttr) {
+            slotNode.attr[key] = topAttr[key]
+            delete topAttr[key]
+          }
+        })
+      }
+    }
+    resolveVIf()
+    return top
   }
   return callExprNode.arguments[0].elements.map(slotNode => {
     let keyProperty = false
     let fnProperty = false
     let proxyProperty = false
+    let vIfNode
+    let vForNode
+    // TODO v-else
+    if (t.isConditionalExpression(slotNode)) {
+      // vIfCode = genCode(slotNode.test)
+      vIfNode = t.cloneNode(slotNode, true)
+      slotNode = slotNode.consequent
+    }
+    if (t.isCallExpression(slotNode)) {
+      vForNode = t.cloneNode(slotNode, true)
+      slotNode = slotNode.arguments[1].body.body[0].argument
+    }
     slotNode.properties.forEach(property => {
       switch (property.key.name) {
         case 'key':
@@ -367,17 +454,31 @@ function traverseResolveScopedSlots (callExprNode, state) {
           proxyProperty = property
       }
     })
-    const slotName = keyProperty.value.value
-    const returnExprNodes = fnProperty.value.body.body[0].argument
-    if (!state.options.betterScopedSlots && !proxyProperty) {
-      const resourcePath = state.options.resourcePath
+    const slotNameNode = keyProperty.value
+    const isStaticSlotName = t.isStringLiteral(slotNameNode)
+    const slotName = isStaticSlotName ? slotNameNode.value : genCode(slotNameNode)
+    // 移除动态拼接的 index 部分
+    // TODO 动态 slotName 如使用到 v-for 作用域变量，输出固定名称 $dynamic
+    const slotNameOrigin = isStaticSlotName ? slotName : slotName.replace(/\+\('\.'\+\S+?\)\}\}$/, '}}')
+    let returnExprNodes = fnProperty.value.body.body[0].argument
+    if (vForNode) {
+      vForNode.arguments[1].body.body[0].argument = returnExprNodes
+      returnExprNodes = vForNode
+    }
+    if (vIfNode) {
+      vIfNode.consequent = returnExprNodes
+      returnExprNodes = vIfNode
+    }
+    const parentNode = callExprNode.$node
+    if (options.scopedSlotsCompiler !== 'augmented' && slotNode.scopedSlotsCompiler !== 'augmented' && !proxyProperty) {
+      // 暂不处理旧版编译模式对于动态 slotName 的处理
+      const resourcePath = options.resourcePath
       const ownerName = path.basename(resourcePath, path.extname(resourcePath))
 
-      const parentNode = callExprNode.$node
       const parentName = parentNode.type
 
       const paramExprNode = fnProperty.value.params[0]
-      return state.options.platform.resolveScopedSlots(
+      const node = options.platform.resolveScopedSlots(
         slotName, {
           genCode,
           generate,
@@ -396,19 +497,25 @@ function traverseResolveScopedSlots (callExprNode, state) {
         },
         state
       )
+      // 对原生支持作用域插槽的小程序平台，优化节点
+      if (['mp-baidu', 'mp-alipay'].includes(platformName)) {
+        node.attr[ATTR_SLOT_ORIGIN] = slotNameOrigin
+        return merge(node, ['template', 'block'])
+      }
+      return node
     }
-    const children = normalizeChildren(traverseExpr(returnExprNodes, state))
+    if (options.scopedSlotsCompiler === 'auto' && slotNode.scopedSlotsCompiler === 'augmented') {
+      parentNode.attr['scoped-slots-compiler'] = 'augmented'
+    }
     // 除百度、字节外其他小程序仅默认插槽可以支持多个节点
-    if (single(children, slotName, ['template', 'block'])) {
-      return children[0]
-    }
-    return {
+    return merge({
       type: 'block',
+      children: normalizeChildren(traverseExpr(returnExprNodes, state)),
       attr: {
-        slot: slotName
-      },
-      children
-    }
+        slot: slotName,
+        [ATTR_SLOT_ORIGIN]: slotNameOrigin
+      }
+    }, ['template', 'block'])
   })
 }
 
@@ -424,8 +531,15 @@ function traverseRenderList (callExprNode, state) {
 
   const prefix = state.options.platform.directive
 
+  const isBaidu = state.options.platform.name === 'mp-baidu'
+  let forValue = genCode(callExprNode.arguments[0], isBaidu)
+
+  if (isBaidu && forKey) {
+    forValue += ` trackBy ${getForKey(forKey, forIndex, state)}`
+  }
+
   const attr = {
-    [prefix + 'for']: genCode(callExprNode.arguments[0]),
+    [prefix + 'for']: forValue,
     [prefix + 'for-item']: forItem
   }
 
@@ -433,7 +547,7 @@ function traverseRenderList (callExprNode, state) {
     attr[prefix + 'for-index'] = forIndex
   }
 
-  if (forKey) {
+  if (forKey && !isBaidu) {
     const key = getForKey(forKey, forIndex, state)
     if (key) {
       attr[prefix + 'key'] = key

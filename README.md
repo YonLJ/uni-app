@@ -1,8 +1,13 @@
 # uni-app
 
+<p>
+  简体中文 | <a href="https://github.com/dcloudio/uni-app/blob/dev/README_en-US.md">English</a>
+</p>
+
 `uni-app` 是一个使用 `Vue.js` 开发小程序、H5、App的统一前端框架。官网地址：[https://uniapp.dcloud.io](https://uniapp.dcloud.io)
 
-开发者使用 `Vue` 语法编写代码，`uni-app` 框架将其编译到 小程序（微信/支付宝/百度/字节跳动/QQ/钉钉）、App（iOS/Android）、H5等多个平台，保证其正确运行并达到优秀体验。
+开发者使用 `Vue` 语法编写代码，`uni-app` 框架将其编译到 小程序（微信/支付宝/百度/字节跳动/QQ/快手/钉钉/小红书）、App（iOS/Android）、H5等多个平台，保证其正确运行并达到优秀体验。
+
 
 # uni-app的特点
 
@@ -15,9 +20,11 @@
 
 ## 扫码体验
 
-开发一次，编译到10个平台。依次扫描10个二维码，亲自体验最全面的跨平台效果！
+开发一次，编译到14个平台。依次扫描14个二维码，亲自体验最全面的跨平台效果！
 
-<img src="https://img.cdn.aliyun.dcloud.net.cn/uni-app/uni-app-qr-all.jpg"/>
+<div align="center">
+  <img src="https://vkceyugu.cdn.bspapp.com/VKCEYUGU-a90b5f95-90ba-4d30-a6a7-cd4d057327db/cf5727bc-fbe6-4d7e-bd92-e0d16e6f53b0.jpg"/>
+</div>
 
 *注： 某些平台不能提交简单demo，补充了一些其他功能。*
 
@@ -40,7 +47,7 @@
 
 ## 更新日志
 
-`uni-app`一直保持高频的更新迭代，详见[uni-app 更新日志](docs/release.md)。
+`uni-app`一直保持高频的更新迭代，详见[正式版更新日志](https://uniapp.dcloud.net.cn/release)、[Alpha版更新日志](https://uniapp.dcloud.net.cn/release-note-alpha)。
 
 ## 论坛
 
@@ -61,8 +68,8 @@
 
 ## 常见疑问
 
-- 问：不同端有不同的需求、不同的特色，登陆支付也不一样，如何统一？
-- 答：差异部分使用条件编译。uni-app提供了灵活强大的[条件编译](https://uniapp.dcloud.io/platform)。可以完美处理复用部分和差异部分。真正一套工程源码。当业务升级时，不再需要多端维护。如果多端维护，经常会因为某些端的流量不大，就一直拖延无法让那些用户享受到最新服务。另外登陆支付在客户端部分，已经被uni-app统一成一样的api了。
+- 问：不同端有不同的需求、不同的特色，登录支付也不一样，如何统一？
+- 答：差异部分使用条件编译。uni-app提供了灵活强大的[条件编译](https://uniapp.dcloud.io/platform)。可以完美处理复用部分和差异部分。真正一套工程源码。当业务升级时，不再需要多端维护。如果多端维护，经常会因为某些端的流量不大，就一直拖延无法让那些用户享受到最新服务。另外登录支付在客户端部分，已经被uni-app统一成一样的api了。
 
 
 - 问：多端是不是一种妥协，是否会造成性能下降？

@@ -1,5 +1,6 @@
 import {
-  isPlainObject
+  isPlainObject,
+  hasOwn
 } from 'uni-shared'
 import navigateTo from 'uni-helpers/navigate-to'
 import redirectTo from '../../../mp-weixin/helpers/redirect-to'
@@ -75,7 +76,7 @@ function _handleNetworkInfo (result) {
 }
 
 const protocols = { // 需要做转换的 API 列表
-  navigateTo,
+  navigateTo: navigateTo(),
   redirectTo,
   returnValue (methodName, res = {}) { // 通用 returnValue 解析
     if (res.error || res.errorMessage) {
@@ -176,7 +177,6 @@ const protocols = { // 需要做转换的 API 列表
     const args = {
       title: 'content',
       icon: 'type',
-      duration: false,
       image: false,
       mask: false
     }
@@ -203,8 +203,7 @@ const protocols = { // 需要做转换的 API 列表
   },
   showLoading: {
     args: {
-      title: 'content',
-      mask: false
+      title: 'content'
     }
   },
   uploadFile: {
@@ -251,8 +250,17 @@ const protocols = { // 需要做转换的 API 列表
     // TODO 有没有返回值还需要测试下
   },
   chooseImage: {
-    returnValue: {
-      apFilePaths: 'tempFilePaths'
+    returnValue (result) {
+      const hasTempFilePaths = hasOwn(result, 'tempFilePaths') && result.tempFilePaths
+      if (hasOwn(result, 'apFilePaths') && !hasTempFilePaths) {
+        result.tempFilePaths = result.apFilePaths
+        delete result.apFilePaths
+      }
+      if (!hasOwn(result, 'tempFiles') && hasTempFilePaths) {
+        result.tempFiles = []
+        result.tempFilePaths.forEach(tempFilePath => result.tempFiles.push({ path: tempFilePath }))
+      }
+      return {}
     }
   },
   previewImage: {
@@ -381,6 +389,23 @@ const protocols = { // 需要做转换的 API 列表
       }
     }
   },
+  getUserProfile: {
+    name: my.canIUse('getOpenUserInfo') ? 'getOpenUserInfo' : 'getAuthUserInfo',
+    returnValue (result) {
+      if (my.canIUse('getOpenUserInfo')) {
+        let response = {}
+        try {
+          response = JSON.parse(result.response).response
+        } catch (e) {}
+        result.nickName = response.nickName
+        result.avatar = response.avatar
+      }
+      result.userInfo = {
+        nickName: result.nickName,
+        avatarUrl: result.avatar
+      }
+    }
+  },
   requestPayment: {
     name: 'tradePay',
     args: {
@@ -439,12 +464,6 @@ const protocols = { // 需要做转换的 API 列表
   hideHomeButton: {
     name: 'hideBackHome'
   },
-  saveImageToPhotosAlbum: {
-    name: 'saveImage',
-    args: {
-      filePath: 'url'
-    }
-  },
   saveVideoToPhotosAlbum: {
     args: {
       filePath: 'src'
@@ -461,6 +480,16 @@ const protocols = { // 需要做转换的 API 列表
       result.detailInfo = info.address
       result.telNumber = info.mobilePhone
       result.errMsg = result.resultStatus
+    }
+  }
+}
+
+// 钉钉小程序处理
+if (!my.canIUse('saveImageToPhotosAlbum')) {
+  protocols.saveImageToPhotosAlbum = {
+    name: 'saveImage',
+    args: {
+      filePath: 'url'
     }
   }
 }

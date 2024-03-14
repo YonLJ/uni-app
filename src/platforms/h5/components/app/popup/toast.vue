@@ -52,7 +52,7 @@ export default {
     icon: {
       default: 'success',
       validator (value) {
-        return ['success', 'loading', 'none'].indexOf(value) !== -1
+        return ['success', 'loading', 'error', 'none'].indexOf(value) !== -1
       }
     },
     image: {
@@ -79,6 +79,9 @@ export default {
       }
       if (this.icon === 'loading') {
         return 'uni-loading'
+      }
+      if (this.icon === 'error') {
+        return 'uni-icon-error'
       }
       return ''
     }
@@ -127,7 +130,7 @@ uni-toast .uni-simple-toast__text {
   font-size: 13px;
   text-align: center;
   max-width: 100%;
-  word-break: break-all;
+  word-break: break-word;
   white-space: normal;
 }
 
@@ -168,6 +171,11 @@ uni-toast .uni-icon_toast.uni-icon-success-no-circle:before {
   font-size: 55px;
 }
 
+uni-toast .uni-icon_toast.uni-icon-error:before {
+  color: #ffffff;
+  font-size: 50px;
+}
+
 uni-toast .uni-icon_toast.uni-loading {
   margin: 20px 0 0;
   width: 38px;
@@ -177,5 +185,17 @@ uni-toast .uni-icon_toast.uni-loading {
 
 uni-toast .uni-toast__content {
   margin: 0 0 15px;
+}
+
+@media (prefers-color-scheme: dark) {
+  uni-toast .uni-toast {
+    background-color: #606060;
+    color: var(--UI-FG-0);
+  }
+
+  uni-toast .uni-icon_toast.uni-icon-error:before,
+  uni-toast .uni-icon_toast.uni-icon-success-no-circle:before {
+  color: rgba(255,255,255,0.9);
+}
 }
 </style>

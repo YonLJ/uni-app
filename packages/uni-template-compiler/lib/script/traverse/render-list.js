@@ -2,6 +2,7 @@ const t = require('@babel/types')
 
 const {
   VAR_ORIGINAL,
+  VAR_INDEX,
   IDENTIFIER_FOR,
   METHOD_RENDER_LIST
 } = require('../../constants')
@@ -120,6 +121,10 @@ module.exports = function traverseRenderList (path, state) {
   const params = functionExpression.node.params
   const forItem = params[0].name
   let forIndex = params.length > 1 && params[1].name
+  let forKey = params.length > 2 && params[2].name
+  if (forKey) {
+    [forKey, forIndex] = [forIndex, forKey]
+  }
 
   if (!forIndex) {
     if (!hasOwn(state.options, '$forIndexId')) {
@@ -132,10 +137,13 @@ module.exports = function traverseRenderList (path, state) {
   const forStateScoped = {
     context: forItem,
     forItem,
+    forKey,
     forIndex,
     forExtra: getForExtra(forItem, forIndex, path, state),
     propertyArray: [],
-    declarationArray: []
+    declarationArray: [],
+    renderSlotStatementArray: [],
+    path
   }
 
   const forState = {
@@ -149,13 +157,15 @@ module.exports = function traverseRenderList (path, state) {
     propertyArray: [],
     declarationArray: [],
     computedProperty: {},
-    initExpressionStatementArray: state.initExpressionStatementArray
+    initExpressionStatementArray: state.initExpressionStatementArray,
+    renderSlotStatementArray: state.renderSlotStatementArray,
+    resolveSlotStatementArray: state.resolveSlotStatementArray
   }
 
   functionExpression.traverse(require('./visitor'), forState)
 
   const forPath = path.get('arguments.0')
-  if (forStateScoped.propertyArray.length) {
+  if (forStateScoped.propertyArray.length || forStateScoped.renderSlotStatementArray.length || forKey) {
     // for => map
     forPath.replaceWith(
       getMemberExpr(
@@ -165,9 +175,12 @@ module.exports = function traverseRenderList (path, state) {
           forPath.node,
           forStateScoped.propertyArray,
           forStateScoped.declarationArray,
+          forStateScoped.renderSlotStatementArray,
           [], // eventPropertyArray
           forItem,
-          forIndex
+          forKey,
+          forIndex,
+          state
         ),
         forState
       )
@@ -176,6 +189,26 @@ module.exports = function traverseRenderList (path, state) {
     functionExpression.traverse(origVisitor, {
       forItem
     })
+    if (forKey) {
+      functionExpression.traverse({
+        Identifier (path) {
+          if (
+            !path.node.$mpProcessed &&
+            path.node.name === this.forIndex &&
+            path.isReferencedIdentifier()
+          ) {
+            const forItemIdentifier = t.identifier(VAR_INDEX)
+            forItemIdentifier.$mpProcessed = true
+            path.replaceWith(
+              t.memberExpression(t.identifier(this.forItem), forItemIdentifier)
+            )
+          }
+        }
+      }, {
+        forItem,
+        forIndex
+      })
+    }
     const keys = Object.keys(forState.computedProperty)
     if (keys.length) {
       keys.forEach(key => {

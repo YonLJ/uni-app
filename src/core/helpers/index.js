@@ -45,7 +45,7 @@ export function getTargetDataset (target) {
     const $attrs = vm.$attrs
     for (const key in $attrs) {
       if (key.startsWith('data-')) {
-        const newKey = camelize(key.substr(5))
+        const newKey = camelize(key.substr(5).toLowerCase())
         const value = $attrs[key]
         dataset[newKey] = force ? value : dataset[newKey] || value
       }
@@ -63,7 +63,7 @@ export function getTargetDataset (target) {
       $parent = $parent.$parent
     }
   } else {
-    dataset = target.dataset || {}
+    dataset = Object.assign({}, target.dataset, target.__uniDataset)
   }
   return normalizeDataset(dataset)
 }

@@ -48,7 +48,13 @@
   "apiList": {
     "uni.getLocation": true,
     "uni.openLocation": true,
-    "uni.chooseLocation": true
+    "uni.chooseLocation": true,
+    "uni.onLocationChange": true,
+    "uni.onLocationChangeError": true,
+    "uni.startLocationUpdate": true,
+    "uni.stopLocationUpdate": true,
+    "uni.offLocationChange": true,
+    "uni.offLocationChangeError": true
   }
 }, {
   "name": "media",
@@ -206,6 +212,7 @@
     "uni.login": true,
     "uni.checkSession": true,
     "uni.getUserInfo": true,
+    "uni.getUserProfile": true,
     "uni.share": true,
     "uni.showShareMenu": true,
     "uni.hideShareMenu": true,
@@ -224,6 +231,7 @@
   "apiList": {
     "uni.createRewardedVideoAd": true,
     "uni.createFullScreenVideoAd": true,
-    "uni.'createInterstitialAd'": true
+    "uni.'createInterstitialAd'": true,
+    "uni.'createInteractiveAd'": true
   }
 }]

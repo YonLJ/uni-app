@@ -36,27 +36,27 @@ describe('mp:compiler-mp-toutiao', () => {
     )
     assertCodegen(
       '<p class="static" :class="{ active: isActive, \'text-danger\': hasError }">2</p>',
-      '<view class="{{(((\'static _p\')+\' \'+((isActive)?\'active\':\'\'))+\' \'+((hasError)?\'text-danger\':\'\'))}}">2</view>'
+      '<view class="{{((((\'static\')+\' \'+\'_p\')+\' \'+((isActive)?\'active\':\'\'))+\' \'+((hasError)?\'text-danger\':\'\'))}}">2</view>'
     )
     assertCodegen(
       '<p class="static" :class="[activeClass, errorClass]">3</p>',
-      '<view class="{{(((\'static _p\')+\' \'+activeClass)+\' \'+errorClass)}}">3</view>'
+      '<view class="{{((((\'static\')+\' \'+\'_p\')+\' \'+activeClass)+\' \'+errorClass)}}">3</view>'
     )
     assertCodegen(
       '<p class="static" :class="[isActive ? activeClass : \'\', errorClass]">4</p>',
-      '<view class="{{(((\'static _p\')+\' \'+(isActive?activeClass:\'\'))+\' \'+errorClass)}}">4</view>'
+      '<view class="{{((((\'static\')+\' \'+\'_p\')+\' \'+(isActive?activeClass:\'\'))+\' \'+errorClass)}}">4</view>'
     )
     assertCodegen(
       '<p class="static" :class="[{ active: isActive }, errorClass]">5</p>',
-      '<view class="{{(((\'static _p\')+\' \'+((isActive)?\'active\':\'\'))+\' \'+errorClass)}}">5</view>'
+      '<view class="{{((((\'static\')+\' \'+\'_p\')+\' \'+((isActive)?\'active\':\'\'))+\' \'+errorClass)}}">5</view>'
     )
     assertCodegen(
       '<p class="static" :class="[{ active: isActive, disabled: isDisabled }, errorClass]">52</p>',
-      '<view class="{{(((\'static _p\')+\' \'+(((isActive)?\'active\':\'\')+\' \'+((isDisabled)?\'disabled\':\'\')))+\' \'+errorClass)}}">52</view>'
+      '<view class="{{((((\'static\')+\' \'+\'_p\')+\' \'+(((isActive)?\'active\':\'\')+\' \'+((isDisabled)?\'disabled\':\'\')))+\' \'+errorClass)}}">52</view>'
     )
     assertCodegen(
       '<div class="container" :class="computedClassObject">6</div>',
-      '<view class="{{((\'container _div\')+\' \'+computedClassObject)}}">6</view>'
+      '<view class="{{(((\'container\')+\' \'+\'_div\')+\' \'+computedClassObject)}}">6</view>'
     )
     //     assertCodegen(
     //       `<div class="container" :class="computedClassObject">6</div>`,
@@ -73,11 +73,15 @@ describe('mp:compiler-mp-toutiao', () => {
     )
     assertCodegen(
       '<p :class="classStr1 || classStr2" class="bg">9</p>',
-      '<view class="{{((\'bg _p\')+\' \'+(classStr1||classStr2))}}">9</view>'
+      '<view class="{{(((\'bg\')+\' \'+\'_p\')+\' \'+(classStr1||classStr2))}}">9</view>'
     )
     assertCodegen(
       '<p class="static" :class="[{ active: isActive }, errorClass, [flex, \'flex-row\']]">10</p>',
-      '<view class="{{((((\'static _p\')+\' \'+((isActive)?\'active\':\'\'))+\' \'+errorClass)+\' \'+((flex)+\' \'+\'flex-row\'))}}">10</view>'
+      '<view class="{{(((((\'static\')+\' \'+\'_p\')+\' \'+((isActive)?\'active\':\'\'))+\' \'+errorClass)+\' \'+((flex)+\' \'+\'flex-row\'))}}">10</view>'
+    )
+    assertCodegen(
+      '<p class="a external-class c" :class="class1">hello world</p>',
+      '<view class="{{(((((\'a\')+\' \'+\'external-class\')+\' \'+\'c\')+\' \'+\'_p\')+\' \'+class1)}}">hello world</view>'
     )
   })
 
@@ -85,6 +89,18 @@ describe('mp:compiler-mp-toutiao', () => {
     assertCodegen(
       '<test v-show="shown">hello world</test>',
       '<test bind:-data-custom-hidden="{{!(shown)}}" vue-id="551070e6-1" bind:__l="__l" vue-slots="{{[\'default\']}}">hello world</test>'
+    )
+  })
+
+  it('generate scoped slot with slotMultipleInstance', () => {
+    assertCodegen(
+      '<my-component><template v-slot="item"><view>{{item}}</view></template></my-component>',
+      '<my-component vue-id="551070e6-1" bind:__l="__l" vue-slots="{{[\'default\']}}"><block slot="{{\'default\'+(\'.\'+0)}}" tt:if="{{$root.m0}}"><block tt:for="{{$root.l0}}" tt:for-item="_item" tt:for-index="_index"><view>{{_item}}</view></block></block></my-component>',
+      'with(this){var m0=$hasSSP("551070e6-1");var l0=m0?$getSSP("551070e6-1","default",true):null;$mp.data=Object.assign({},{$root:{m0:m0,l0:l0}})}',
+      {
+        scopedSlotsCompiler: 'augmented',
+        slotMultipleInstance: true
+      }
     )
   })
 })

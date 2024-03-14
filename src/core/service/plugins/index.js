@@ -24,6 +24,10 @@ import {
   getTabBarScrollPosition
 } from './app/router-guard'
 
+import {
+  uniIdMixin
+} from 'uni-shared'
+
 function getMinId (routes) {
   let minId = 0
   routes.forEach(route => {
@@ -42,10 +46,17 @@ function getHash () {
 
 function getLocation (base = '/') {
   let path = decodeURI(window.location.pathname)
+  const search = window.location.search
+  const hash = window.location.hash
+  // 检查和纠正 path
+  if (base[base.length - 1] === '/' && path === base.substring(0, base.length - 1)) {
+    path = base
+    window.history.replaceState({}, '', base + search + hash)
+  }
   if (base && path.indexOf(base) === 0) {
     path = path.slice(base.length)
   }
-  return (path || '/') + window.location.search + window.location.hash
+  return (path || '/') + search + hash
 }
 
 /**
@@ -73,6 +84,8 @@ export default {
     initPolyfill(Vue)
 
     lifecycleMixin(Vue)
+
+    uniIdMixin(Vue)
 
     /* eslint-disable no-undef */
     if (typeof __UNI_ROUTER_BASE__ !== 'undefined') {
@@ -141,7 +154,7 @@ export default {
               keepAliveInclude
             }
           }
-          const appMixin = createAppMixin(routes, entryRoute)
+          const appMixin = createAppMixin(Vue, routes, entryRoute)
           // mixin app hooks
           Object.keys(appMixin).forEach(hook => {
             options[hook] = options[hook] ? [].concat(appMixin[hook], options[hook]) : [

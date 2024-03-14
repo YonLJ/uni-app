@@ -2,14 +2,25 @@ import Vue from 'vue'
 
 import {
   initHooks,
+  initUnknownHooks,
   initMocks
 } from 'uni-wrapper/util'
+
+import {
+  initAppLocale,
+  normalizeLocale,
+  LOCALE_EN
+} from 'uni-helpers/i18n/index'
 
 import EventChannel from 'uni-helpers/EventChannel'
 
 import {
   getEventChannel
 } from 'uni-helpers/navigate-to'
+
+import {
+  uniIdMixin
+} from 'uni-shared'
 
 const hooks = [
   'onShow',
@@ -25,6 +36,9 @@ function initEventChannel () {
     // 微信小程序使用自身getOpenerEventChannel
     if (__PLATFORM__ === 'mp-weixin') {
       return this.$scope.getOpenerEventChannel()
+    }
+    if (__PLATFORM__ === 'mp-alipay') {
+      if (my.canIUse('getOpenerEventChannel')) { return this.$scope.getOpenerEventChannel() }
     }
     if (!this.__eventChannel__) {
       this.__eventChannel__ = new EventChannel()
@@ -45,37 +59,59 @@ function initScopedSlotsParams () {
   const center = {}
   const parents = {}
 
-  Vue.prototype.$hasScopedSlotsParams = function (vueId) {
-    const has = center[vueId]
-    if (!has) {
-      parents[vueId] = this
-      this.$on('hook:destory', () => {
-        delete parents[vueId]
-      })
-    }
-    return has
-  }
-
-  Vue.prototype.$getScopedSlotsParams = function (vueId, name, key) {
-    const data = center[vueId]
-    if (data) {
-      const object = data[name] || {}
-      return key ? object[key] : object
-    } else {
-      parents[vueId] = this
-      this.$on('hook:destory', () => {
-        delete parents[vueId]
-      })
+  function currentId (fn) {
+    const vueIds = this.$options.propsData.vueId
+    if (vueIds) {
+      const vueId = vueIds.split(',')[0]
+      fn(vueId)
     }
   }
 
-  Vue.prototype.$setScopedSlotsParams = function (name, value) {
-    const vueId = this.$options.propsData.vueId
-    const object = center[vueId] = center[vueId] || {}
-    object[name] = value
-    if (parents[vueId]) {
-      parents[vueId].$forceUpdate()
+  Vue.prototype.$hasSSP = function (vueId) {
+    const slot = center[vueId]
+    if (!slot) {
+      parents[vueId] = this
+      this.$on('hook:destroyed', () => {
+        delete parents[vueId]
+      })
     }
+    return slot
+  }
+
+  Vue.prototype.$getSSP = function (vueId, name, needAll) {
+    const slot = center[vueId]
+    if (slot) {
+      const params = slot[name] || []
+      if (needAll) {
+        return params
+      }
+      return params[0]
+    }
+  }
+
+  Vue.prototype.$setSSP = function (name, value) {
+    let index = 0
+    currentId.call(this, vueId => {
+      const slot = center[vueId]
+      const params = slot[name] = slot[name] || []
+      params.push(value)
+      index = params.length - 1
+    })
+    return index
+  }
+
+  Vue.prototype.$initSSP = function () {
+    currentId.call(this, vueId => {
+      center[vueId] = {}
+    })
+  }
+
+  Vue.prototype.$callSSP = function () {
+    currentId.call(this, vueId => {
+      if (parents[vueId]) {
+        parents[vueId].$forceUpdate()
+      }
+    })
   }
 
   Vue.mixin({
@@ -95,12 +131,14 @@ export default function parseBaseApp (vm, {
   initRefs
 }) {
   initEventChannel()
-  if (__PLATFORM__ === 'mp-weixin' || __PLATFORM__ === 'mp-qq' || __PLATFORM__ === 'mp-toutiao' || __PLATFORM__ === 'mp-kuaishou' || __PLATFORM__ === 'mp-alipay' || __PLATFORM__ === 'mp-baidu') {
+  if (__PLATFORM__ === 'mp-weixin' || __PLATFORM__ === 'mp-qq' || __PLATFORM__ === 'mp-jd' || __PLATFORM__ === 'mp-xhs' || __PLATFORM__ === 'mp-toutiao' || __PLATFORM__ ===
+    'mp-kuaishou' || __PLATFORM__ === 'mp-alipay' || __PLATFORM__ === 'mp-baidu' || __PLATFORM__ === 'mp-lark') {
     initScopedSlotsParams()
   }
   if (vm.$options.store) {
     Vue.prototype.$store = vm.$options.store
   }
+  uniIdMixin(Vue)
 
   Vue.prototype.mpHost = __PLATFORM__
 
@@ -172,7 +210,10 @@ export default function parseBaseApp (vm, {
     })
   }
 
+  initAppLocale(Vue, vm, normalizeLocale(__GLOBAL__.getSystemInfoSync().language) || LOCALE_EN)
+
   initHooks(appOptions, hooks)
+  initUnknownHooks(appOptions, vm.$options)
 
   return appOptions
 }

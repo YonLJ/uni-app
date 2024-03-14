@@ -51,10 +51,14 @@
             class="uni-video-control-button"
             @click.stop="trigger"
           />
-          <div class="uni-video-current-time">
+          <div
+            v-show="showProgress"
+            class="uni-video-current-time"
+          >
             {{ currentTime|time }}
           </div>
           <div
+            v-show="showProgress"
             ref="progress"
             class="uni-video-progress-container"
             @click.stop="clickProgress($event)"
@@ -73,7 +77,10 @@
               </div>
             </div>
           </div>
-          <div class="uni-video-duration">
+          <div
+            v-show="showProgress"
+            class="uni-video-duration"
+          >
             {{ (duration||durationTime)|time }}
           </div>
         </div>
@@ -364,7 +371,7 @@ export default {
     }
     const danmuList = this.otherData.danmuList = JSON.parse(JSON.stringify(this.danmuList || []))
     danmuList.sort(function (a, b) {
-      return (a.time || 0) - (a.time || 0)
+      return (a.time || 0) - (b.time || 0)
     })
   },
   mounted () {

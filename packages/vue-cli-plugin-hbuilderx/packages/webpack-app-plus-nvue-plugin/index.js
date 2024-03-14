@@ -1,6 +1,7 @@
 const {
   done
 } = require('@vue/cli-shared-utils')
+const { showRunPrompt } = require('@dcloudio/uni-cli-shared')
 
 class WebpackAppPlusNVuePlugin {
   apply (compiler) {
@@ -14,13 +15,10 @@ class WebpackAppPlusNVuePlugin {
     const changedFiles = []
     compiler.hooks.emit.tapAsync('webpack-uni-nvue', (compilation, callback) => {
       changedFiles.length = 0
-      const changedChunks = compilation.chunks.filter(chunk => {
+      compilation.chunks.forEach(chunk => {
         const oldVersion = chunkVersions[chunk.name]
         chunkVersions[chunk.name] = chunk.hash
-        return chunk.hash !== oldVersion
-      })
-      changedChunks.map(chunk => {
-        if (Array.isArray(chunk.files)) {
+        if (chunk.hash !== oldVersion && Array.isArray(chunk.files)) {
           chunk.files.forEach(file => {
             !changedFiles.includes(file) && (changedFiles.push(file))
           })
@@ -41,9 +39,11 @@ class WebpackAppPlusNVuePlugin {
               done('Build complete. PAGES:' + JSON.stringify(changedFiles))
             } else {
               done('Build complete. Watching for changes...')
+              showRunPrompt()
             }
           } else {
             done('Build complete. ')
+            showRunPrompt()
           }
         }
         resolve()

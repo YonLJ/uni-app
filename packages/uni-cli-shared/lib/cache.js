@@ -1,6 +1,9 @@
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
+const {
+  isNormalPage
+} = require('./util')
 /**
  * 1.page-loader 缓存基础的  app.json page.json project.config.json
  * 2.main-loader 缓存 app.json 中的 usingComponents 节点
@@ -49,7 +52,9 @@ function getJsonFile (name) {
 function getChangedJsonFileMap (clear = true) {
   const changedJsonFileMap = new Map()
   for (const name of changedJsonFileSet.values()) {
-    changedJsonFileMap.set(name + '.json', jsonFileMap.get(name))
+    if (isNormalPage(name)) {
+      changedJsonFileMap.set(name + '.json', jsonFileMap.get(name))
+    }
   }
   clear && changedJsonFileSet.clear()
   return changedJsonFileMap
@@ -73,8 +78,12 @@ const supportGlobalUsingComponents = process.env.UNI_PLATFORM === 'mp-weixin' ||
 function updateComponentJson (name, jsonObj, usingComponents = true, type = 'Component') {
   if (type === 'Component') {
     jsonObj.component = true
-  }
-  if (type === 'Page') {
+    if (process.env.UNI_PLATFORM === 'mp-alipay') {
+      const manifestConfig = process.UNI_MANIFEST
+      const alipayConfig = manifestConfig['mp-alipay'] || {}
+      jsonObj.styleIsolation = alipayConfig.styleIsolation || 'apply-shared'
+    }
+  } else if (type === 'Page') {
     if (process.env.UNI_PLATFORM === 'mp-baidu') {
       jsonObj.component = true
     }
@@ -87,6 +96,9 @@ function updateComponentJson (name, jsonObj, usingComponents = true, type = 'Com
       const oldJsonObj = JSON.parse(oldJsonStr)
       jsonObj.usingComponents = oldJsonObj.usingComponents || {}
       jsonObj.usingAutoImportComponents = oldJsonObj.usingAutoImportComponents || {}
+      if (oldJsonObj.genericComponents) {
+        jsonObj.genericComponents = oldJsonObj.genericComponents
+      }
       if (oldJsonObj.usingGlobalComponents) { // 复制 global components(针对不支持全局 usingComponents 的平台)
         jsonObj.usingGlobalComponents = oldJsonObj.usingGlobalComponents
       }
@@ -101,9 +113,14 @@ function updateComponentJson (name, jsonObj, usingComponents = true, type = 'Com
 }
 
 function updateUsingGlobalComponents (name, usingGlobalComponents) {
-  if (supportGlobalUsingComponents) {
+  const manifestConfig = process.UNI_MANIFEST
+  const weixinConfig = manifestConfig['mp-weixin']
+  const independentSwitch = !!weixinConfig.independent
+
+  if (!independentSwitch && supportGlobalUsingComponents) {
     return
   }
+
   const oldJsonStr = getJsonFile(name)
   if (oldJsonStr) { // update
     const jsonObj = JSON.parse(oldJsonStr)
@@ -145,33 +162,28 @@ function updateUsingComponents (name, usingComponents, type) {
   }
 
   const oldJsonStr = getJsonFile(name)
-  if (oldJsonStr) { // update
-    const jsonObj = JSON.parse(oldJsonStr)
-    if (type === 'Component') {
-      jsonObj.component = true
-    } else if (type === 'Page') {
-      if (process.env.UNI_PLATFORM === 'mp-baidu') {
-        jsonObj.component = true
-      }
+  const jsonObj = oldJsonStr ? JSON.parse(oldJsonStr) : {
+    usingComponents
+  }
+  if (type === 'Component') {
+    jsonObj.component = true
+    if (process.env.UNI_PLATFORM === 'mp-alipay') {
+      const manifestConfig = process.UNI_MANIFEST
+      const alipayConfig = manifestConfig['mp-alipay'] || {}
+      jsonObj.styleIsolation = alipayConfig.styleIsolation || 'apply-shared'
     }
-
+  } else if (type === 'Page') {
+    if (process.env.UNI_PLATFORM === 'mp-baidu') {
+      jsonObj.component = true
+    }
+  }
+  if (oldJsonStr) { // update
     jsonObj.usingComponents = usingComponents
     const newJsonStr = JSON.stringify(jsonObj, null, 2)
     if (newJsonStr !== oldJsonStr) {
       updateJsonFile(name, newJsonStr)
     }
   } else { // add
-    const jsonObj = {
-      usingComponents
-    }
-    if (type === 'Component') {
-      jsonObj.component = true
-    } else if (type === 'Page') {
-      if (process.env.UNI_PLATFORM === 'mp-baidu') {
-        jsonObj.component = true
-      }
-    }
-
     updateJsonFile(name, jsonObj)
   }
 }
@@ -309,7 +321,7 @@ module.exports = {
     if (!fs.existsSync(filepath)) {
       try {
         clearCache()
-      } catch (e) {}
+      } catch (e) { }
       return
     }
     const pagesJsonPath = path.resolve(process.env.UNI_INPUT_DIR, 'pages.json')
@@ -318,7 +330,7 @@ module.exports = {
     if (jsonCache.mtimeMs !== mtimeMs) {
       try {
         clearCache()
-      } catch (e) {}
+      } catch (e) { }
       return
     }
     jsonFileMap = new Map(jsonCache.files)
@@ -339,6 +351,7 @@ module.exports = {
   getWXComponents,
   getGlobalUsingComponents,
   updateAppJson,
+  updateJsonFile,
   updatePageJson,
   updateProjectJson,
   updateComponentJson,
@@ -350,5 +363,6 @@ module.exports = {
   updateComponentGenerics,
   updateGenericComponents,
   getChangedJsonFileMap,
-  getSpecialMethods
+  getSpecialMethods,
+  supportGlobalUsingComponents
 }

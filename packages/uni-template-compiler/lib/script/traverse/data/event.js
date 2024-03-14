@@ -1,5 +1,5 @@
 const t = require('@babel/types')
-const parser = require('@babel/parser')
+const template = require('@babel/template').default
 
 const {
   IDENTIFIER_EVENT,
@@ -7,13 +7,17 @@ const {
   INTERNAL_EVENT_PROXY,
   ATTR_DATA_EVENT_OPTS,
   ATTR_DATA_EVENT_PARAMS,
-  INTERNAL_SET_SYNC
+  INTERNAL_SET_SYNC,
+  INTERNAL_SET_MODEL,
+  ALLOWED_GLOBAL_OBJECT
 } = require('../../../constants')
 
 const {
   getCode,
   customize,
-  processMemberExpression
+  processMemberExpression,
+  replaceMemberExpression,
+  hasMemberExpression
 } = require('../../../util')
 
 const {
@@ -64,7 +68,7 @@ function getIdentifierName (element) {
 function getScoped (scopedArray, element, methodName, state) {
   const identifierName = getIdentifierName(element)
   const scoped = scopedArray.find(scoped => {
-    if (scoped.forItem === identifierName) {
+    if (scoped.forItem === identifierName && !scoped.forKey) {
       return true
     }
   })
@@ -101,6 +105,28 @@ function isForIndex (scopedArray, element) {
   return false
 }
 
+function isForItem (scopedArray, element) {
+  if (t.isIdentifier(element)) {
+    return scopedArray.find(scoped => {
+      if (scoped.forItem === element.name) {
+        return true
+      }
+    })
+  }
+  return false
+}
+
+function isForKey (scopedArray, element) {
+  if (t.isIdentifier(element)) {
+    return scopedArray.find(scoped => {
+      if (scoped.forKey === element.name) {
+        return true
+      }
+    })
+  }
+  return false
+}
+
 function getExtraDataPath (dataPath, methodName) {
   if (methodName === INTERNAL_SET_SYNC) {
     const dataPaths = dataPath.split('.')
@@ -121,21 +147,21 @@ function parseMethod (method, state) {
         if (state.scoped.length) {
           const forExtra = getScoped(state.scoped, element, methodName, state)
           if (!forExtra) {
-            if (isForIndex(state.scoped, element)) {
+            if (isForIndex(state.scoped, element) || isForItem(state.scoped, element) || isForKey(state.scoped, element)) {
               return element
             } else {
-              extraArrayElements.push(t.stringLiteral(
+              extraArrayElements.push(replaceMemberExpression(t.stringLiteral(
                 getExtraDataPath(getCode(processMemberExpression(element, state)),
                   methodName)
-              ))
+              ), state))
             }
           } else {
             extraArrayElements.push(forExtra)
           }
         } else {
-          extraArrayElements.push(t.stringLiteral(
+          extraArrayElements.push(replaceMemberExpression(t.stringLiteral(
             getExtraDataPath(getCode(processMemberExpression(element, state)), methodName)
-          ))
+          ), state))
         }
         return t.stringLiteral('$' + (extraArrayElements.length - 1))
       } else if ( // +1=>1
@@ -204,6 +230,27 @@ function parseEventByCallExpression (callExpr, methods) {
 
 function isValuePath (path) {
   return path.key !== 'key' && path.key !== 'id' && (path.key !== 'property' || path.parent.computed) && !(path.key === 'value' && path.parentPath.parentPath.isObjectPattern()) && !(path.key === 'left' && path.parentPath.parentPath.parentPath.isObjectPattern())
+}
+
+const isSafeScoped = (state) => {
+  const scopedArray = state.scoped
+  let checkForIndex = false
+  for (let index = 0; index < scopedArray.length; index++) {
+    const scoped = scopedArray[index]
+    const arrayExtra = scoped.forExtra[0].elements[0].value
+    // 判断仅外层遍历对象是否包含了 index 参数
+    if (checkForIndex && scoped.forIndex && scoped.forKey) {
+      return false
+    }
+    if (index === 0 && !(scoped.forIndex && scoped.forKey)) {
+      checkForIndex = true
+    }
+    // 简易判断 v-for 中是否包含复杂表达式：数组、对象、方法
+    if (typeof arrayExtra === 'string' && (arrayExtra.startsWith('[') || arrayExtra.startsWith('{') || /\(.*\)/.test(arrayExtra))) {
+      return false
+    }
+  }
+  return true
 }
 
 function parseEvent (keyPath, valuePath, state, isComponent, isNativeOn = false, tagName, ret) {
@@ -278,9 +325,18 @@ function parseEvent (keyPath, valuePath, state, isComponent, isNativeOn = false,
         // "click":function($event) {click1(item);click2(item);}
         const body = funcPath.node.body && funcPath.node.body.body
         const funcParams = funcPath.node.params
-        if (body && body.length && funcParams && funcParams.length === 1) {
+        if (body && body.length && funcParams && funcParams.length === 1 && !hasMemberExpression(funcPath) && isSafeScoped(state)) {
           const exprStatements = body.filter(node => {
-            return t.isExpressionStatement(node) && t.isCallExpression(node.expression)
+            return t.isExpressionStatement(node) && t.isCallExpression(node.expression) && !node.expression.arguments.find(element => {
+              // click1(item().a)
+              if (t.isMemberExpression(element)) {
+                try {
+                  getIdentifierName(element)
+                } catch {
+                  return true
+                }
+              }
+            })
           })
           if (exprStatements.length === body.length) {
             const paramPath = funcPath.get('params')[0]
@@ -304,26 +360,21 @@ function parseEvent (keyPath, valuePath, state, isComponent, isNativeOn = false,
           }
         }
 
-        // 判断是否是复杂表达式  数组  或  对象
-        const isNotDynamicExpression = (state) => {
-          if (!(state.scoped[0])) {
-            return true
+        const testCatch = function (stop) {
+          return function (path) {
+            // TODO 仅使用 name 容易误判
+            if (path.node.object.name === '$event' && path.node.property.name ===
+              'stopPropagation') {
+              isCatch = true
+              stop && path.stop()
+            }
           }
-          const value = state.scoped[0].forExtra[0].elements[0].value
-          return !(typeof value === 'string' && (value.startsWith('[') || value.startsWith('}')))
         }
-
-        // 如果v-for遍历的值为 数组、对象 则进入复杂表达式
-        if (isNotDynamicExpression(state)) {
-          anonymous && funcPath.traverse({
+        // 如果 v-for 遍历的值为 数组、对象、方法 则进入底部匿名表达式处理
+        if (anonymous && isSafeScoped(state)) {
+          funcPath.traverse({
             noScope: true,
-            MemberExpression (path) {
-              if (path.node.object.name === '$event' && path.node.property.name ===
-                'stopPropagation') {
-                isCatch = true
-                path.stop()
-              }
-            },
+            MemberExpression: testCatch(),
             AssignmentExpression (path) { // "update:title": function($event) {title = $event}
               const left = path.node.left
               const right = path.node.right
@@ -361,11 +412,12 @@ function parseEvent (keyPath, valuePath, state, isComponent, isNativeOn = false,
         if (anonymous) {
           // 处理复杂表达式中使用的局部变量（主要在v-for中定义）
           funcPath.traverse({
+            MemberExpression: testCatch(),
             Identifier (path) {
               const scope = path.scope
               const node = path.node
               const name = node.name
-              if (isValuePath(path) && scope && !scope.hasOwnBinding(name) && scope.hasBinding(name) && !params.includes(name) && name !== 'undefined') {
+              if (!ALLOWED_GLOBAL_OBJECT.includes(name) && isValuePath(path) && scope && !scope.hasOwnBinding(name) && scope.hasBinding(name) && !params.includes(name) && name !== 'undefined') {
                 params.push(name)
               }
             }
@@ -374,6 +426,13 @@ function parseEvent (keyPath, valuePath, state, isComponent, isNativeOn = false,
             funcPath.node.params.push(t.identifier(name))
           })
           if (params.length) {
+            if (!isCustom) {
+              const bodyStatements = funcPath.get('body.body')
+              const returnStatement = bodyStatements[0]
+              if (t.isReturnStatement(returnStatement) && t.isCallExpression(returnStatement.node.argument) && returnStatement.node.argument.callee.name === INTERNAL_SET_MODEL) {
+                funcPath.node.body.body.unshift(template('$event=$event.target.value')())
+              }
+            }
             let argumentsName = 'arguments'
             if (funcPath.isArrowFunctionExpression()) {
               argumentsName = 'args'
@@ -383,7 +442,7 @@ function parseEvent (keyPath, valuePath, state, isComponent, isNativeOn = false,
             const paramsUid = funcPath.scope.generateDeclaredUidIdentifier().name
             const dataset = ATTR_DATA_EVENT_PARAMS.substring(5)
             const code = `var ${datasetUid}=${argumentsName}[${argumentsName}.length-1].currentTarget.dataset,${paramsUid}=${datasetUid}.${dataset.replace(/-([a-z])/, (_, str) => str.toUpperCase())}||${datasetUid}['${dataset}'],${params.map(item => `${item}=${paramsUid}.${item}`).join(',')}`
-            funcPath.node.body.body.unshift(parser.parse(code).program.body[0])
+            funcPath.node.body.body.unshift(template(code, { syntacticPlaceholders: true })())
           }
           methods.push(addEventExpressionStatement(funcPath, state, isComponent, isNativeOn))
         }
@@ -513,8 +572,7 @@ module.exports = function processEvent (paths, path, state, isComponent, tagName
     ret.push(
       t.objectProperty(
         t.stringLiteral(ATTR_DATA_EVENT_PARAMS),
-        // 直接使用对象格式微信小程序编译会报错
-        t.stringLiteral(`{{({${params.join(',')}})}}`)
+        t.objectExpression(params.map(param => t.objectProperty(t.identifier(param), t.identifier(param), false, true)))
       )
     )
   }

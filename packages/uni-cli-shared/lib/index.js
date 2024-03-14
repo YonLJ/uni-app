@@ -32,7 +32,10 @@ const {
   normalizePath,
   getComponentName,
   convertStaticStyle,
-  getTemplatePath
+  getTemplatePath,
+  createSource,
+  deleteAsset,
+  showRunPrompt
 } = require('./util')
 
 const {
@@ -57,10 +60,18 @@ const {
   nvueJsPreprocessOptions,
   nvueCssPreprocessOptions,
   nvueHtmlPreprocessOptions,
-  getPlatformGlobal
+  getPlatformGlobal,
+  getPlatformStat,
+  getPlatformPush,
+  getPlatformUniCloud
 } = require('./platform')
 
+const uts = require('./uts')
+
+const { parseTheme, initTheme } = require('./theme')
+
 module.exports = {
+  uts,
   md5,
   tags,
   hasOwn,
@@ -100,11 +111,19 @@ module.exports = {
   getComponentName,
   convertStaticStyle,
   getTemplatePath,
+  createSource,
+  deleteAsset,
+  showRunPrompt,
   jsPreprocessOptions,
   cssPreprocessOptions,
   htmlPreprocessOptions,
   nvueJsPreprocessOptions,
   nvueCssPreprocessOptions,
   nvueHtmlPreprocessOptions,
-  getPlatformGlobal
+  getPlatformGlobal,
+  getPlatformStat,
+  getPlatformPush,
+  getPlatformUniCloud,
+  parseTheme,
+  initTheme
 }

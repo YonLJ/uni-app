@@ -3,6 +3,14 @@ const webviewIds = []
 const UNIAPP_SERVICE_NVUE_ID = '__uniapp__service'
 const WEB_INVOKE_APPSERVICE = 'WEB_INVOKE_APPSERVICE'
 
+function isNvue () {
+  return (window.__dcloud_weex_postMessage || window.__dcloud_weex_)
+}
+
+function isUvue () {
+  return (window.__uniapp_x_postMessage || window.__uniapp_x_)
+}
+
 const publish = function (method, params) {
   const paramsObj = {
     options: {
@@ -12,8 +20,34 @@ const publish = function (method, params) {
     arg: params
   }
 
-  const isNvue = window.__dcloud_weex_postMessage || window.__dcloud_weex_
-  if (isNvue) { // nvue web-view
+  if (isUvue()) { // uvue web-view
+    if (method === 'postMessage') {
+      const message = {
+        data: params
+      }
+      if (window.__uniapp_x_postMessage) {
+        return window.__uniapp_x_postMessage(message)
+      } else {
+        return window.__uniapp_x_.postMessage(JSON.stringify(message))
+      }
+    }
+
+    const serviceMessage = {
+      type: WEB_INVOKE_APPSERVICE,
+      args: {
+        data: paramsObj,
+        webviewIds
+      }
+    }
+    if (window.__uniapp_x_postMessage) {
+      window.__uniapp_x_postMessageToService(serviceMessage)
+    } else {
+      window.__uniapp_x_.postMessageToService(JSON.stringify(serviceMessage))
+    }
+    return
+  }
+
+  if (isNvue()) { // nvue web-view
     if (method === 'postMessage') {
       const message = {
         data: [params]
@@ -37,6 +71,7 @@ const publish = function (method, params) {
     } else {
       window.__dcloud_weex_.postMessageToService(JSON.stringify(serviceMessage))
     }
+    return
   }
 
   if (!window.plus) { // h5 web-view
@@ -117,7 +152,15 @@ export default {
   },
   getEnv (callback) {
     /* eslint-disable standard/no-callback-literal */
-    if (window.plus) {
+    if (isUvue()) {
+      callback({
+        uvue: true
+      })
+    } else if (isNvue()) {
+      callback({
+        nvue: true
+      })
+    } else if (window.plus) {
       callback({
         plus: true
       })

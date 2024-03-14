@@ -1,6 +1,7 @@
 import {
   wgs84togcj02,
-  gcj02towgs84
+  gcj02towgs84,
+  warpPlusErrorCallback
 } from '../util'
 
 import {
@@ -51,8 +52,11 @@ function getLocationSuccess (type, position, callbackId) {
 export function getLocation ({
   type = 'wgs84',
   geocode = false,
-  altitude = false
+  altitude = false,
+  isHighAccuracy = false,
+  highAccuracyExpireTime
 } = {}, callbackId) {
+  const errorCallback = warpPlusErrorCallback(callbackId, 'getLocation')
   plus.geolocation.getCurrentPosition(
     position => {
       getLocationSuccess(type, position, callbackId)
@@ -63,13 +67,12 @@ export function getLocation ({
         getLocationSuccess(type, e, callbackId)
         return
       }
-
-      invoke(callbackId, {
-        errMsg: 'getLocation:fail ' + e.message
-      })
+      errorCallback(e)
     }, {
       geocode: geocode,
-      enableHighAccuracy: altitude
+      enableHighAccuracy: isHighAccuracy || altitude,
+      timeout: highAccuracyExpireTime,
+      coordsType: type
     }
   )
 }

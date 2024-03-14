@@ -5,7 +5,7 @@
       class="uni-input-wrapper"
     >
       <div
-        v-show="!(composing || valueSync.length || !valid)"
+        v-show="showPlaceholder"
         ref="placeholder"
         :style="placeholderStyle"
         :class="placeholderClass"
@@ -21,16 +21,19 @@
         :disabled="disabled"
         :type="inputType"
         :maxlength="maxlength"
-        :step="step"
+        :step="_step"
         :enterkeyhint="confirmType"
+        :pattern="type === 'number' ? '[0-9]*' : null"
         class="uni-input-input"
-        autocomplete="off"
+        :autocomplete="autocomplete"
+        :inputmode="inputmode"
         @change.stop
         @focus="_onFocus"
         @blur="_onBlur"
         @input.stop="_onInput"
         @compositionstart.stop="_onComposition"
         @compositionend.stop="_onComposition"
+        @compositionupdate.stop="_onComposition"
         @keyup.enter.stop="_onKeyup"
       >
       <!-- fix: 禁止 readonly 状态获取焦点 -->
@@ -42,7 +45,7 @@
         :readonly="disabled"
         :type="inputType"
         :maxlength="maxlength"
-        :step="step"
+        :step="_step"
         class="uni-input-input"
         @focus="($event) => $event.target.blur()"
       >
@@ -53,8 +56,11 @@
 import {
   field
 } from 'uni-mixins'
-const INPUT_TYPES = ['text', 'number', 'idcard', 'digit', 'password']
+import { kebabCase } from 'uni-shared'
+const INPUT_TYPES = ['text', 'number', 'idcard', 'digit', 'password', 'tel']
 const NUMBER_TYPES = ['number', 'digit']
+const AUTOCOMPLETES = ['off', 'one-time-code']
+const INPUT_MODES = ['none', 'text', 'decimal', 'numeric', 'tel', 'search', 'email', 'url']
 export default {
   name: 'Input',
   mixins: [field],
@@ -94,11 +100,25 @@ export default {
     confirmType: {
       type: String,
       default: 'done'
+    },
+    textContentType: {
+      type: String,
+      default: ''
+    },
+    step: {
+      type: String,
+      default: '0.000000000000000001'
+    },
+    inputmode: {
+      type: String,
+      default: undefined,
+      validator (value) {
+        return !!~INPUT_MODES.indexOf(value)
+      }
     }
   },
   data () {
     return {
-      valid: true,
       wrapperHeight: 0,
       cachedValue: ''
     }
@@ -123,15 +143,37 @@ export default {
       }
       return this.password ? 'password' : type
     },
-    step () {
+    _step () {
       // 处理部分设备中无法输入小数点的问题
-      return ~NUMBER_TYPES.indexOf(this.type) ? '0.000000000000000001' : ''
+      return ~NUMBER_TYPES.indexOf(this.type) ? this.step : ''
+    },
+    autocomplete () {
+      const camelizeIndex = AUTOCOMPLETES.indexOf(this.textContentType)
+      const kebabCaseIndex = AUTOCOMPLETES.indexOf(kebabCase(this.textContentType))
+      const index = camelizeIndex !== -1
+        ? camelizeIndex
+        : kebabCaseIndex !== -1
+          ? kebabCaseIndex
+          : 0
+      return AUTOCOMPLETES[index]
+    },
+    showPlaceholder () {
+      const dotIndex = this.type === 'digit' ? this.cachedValue.indexOf('.') : -1
+      return !(
+        this.composing || this.valueSync.length || this.cachedValue === '-' ||
+        (dotIndex !== -1 && dotIndex === this.cachedValue.length - 1)
+      )
     }
   },
   watch: {
     maxlength (value) {
       const realValue = this.valueSync.slice(0, parseInt(value, 10))
       realValue !== this.valueSync && (this.valueSync = realValue)
+    },
+    valueSync (value) {
+      if (this.type === 'number' && !(this.cachedValue === '-' && value === '')) {
+        this.cachedValue = value
+      }
     }
   },
   created () {
@@ -169,54 +211,110 @@ export default {
   },
   methods: {
     _onKeyup ($event) {
+      const input = $event.target
       this.$trigger('confirm', $event, {
-        value: $event.target.value
+        value: input.value
       })
+      if (!this.confirmHold) {
+        input.blur()
+      }
     },
     _onInput ($event, force) {
-      if (this.composing) {
+      let outOfMaxlength = false
+
+      if (this.composing && this.ignoreCompositionEvent) {
         return
       }
 
-      if (~NUMBER_TYPES.indexOf(this.type)) {
-        // 在输入 - 负号 的情况下，event.target.value没有值，但是会触发校验 false，因此做此处理
-        this.valid = this.$refs.input.validity && this.$refs.input.validity.valid
-        this.cachedValue = this.valueSync
+      if (this.inputType === 'number') {
+        // type="number" 不支持 maxlength 属性，因此需要主动限制长度。
+        const maxlength = parseInt(this.maxlength, 10)
+        if (maxlength > 0 && $event.target.value.length > maxlength) {
+          // 输入前字符长度超出范围，则不触发input，且将值还原
+          // 否则截取一定长度且触发input
+          if (this.cachedValue.length === maxlength) {
+            this.valueSync = this.cachedValue
+            outOfMaxlength = true
+          } else {
+            $event.target.value = $event.target.value.slice(0, maxlength)
+            this.valueSync = $event.target.value
+          }
+        }
 
-        // 处理部分输入法可以输入其它字符的情况
-        // 上一处理导致无法输入 - ，因此去除
-        /* if (this.$refs.input.validity && !this.$refs.input.validity.valid) {
-          $event.target.value = this.cachedValue
-          this.valueSync = $event.target.value
+        // 数字类型输入错误时无法获取具体的值，自定义校验和纠正。
+        this.__clearCachedValue && $event.target.removeEventListener('blur', this.__clearCachedValue)
+        if ($event.target.validity && !$event.target.validity.valid) {
+          if (
+            ((!this.cachedValue || !$event.target.value) && $event.data === '-') ||
+            (this.cachedValue[0] === '-' && $event.inputType === 'deleteContentBackward')
+          ) {
+            this.cachedValue = '-'
+            this.valueSync = ''
+            const clearCachedValue = this.__clearCachedValue = () => {
+              this.cachedValue = $event.target.value = ''
+            }
+            $event.target.addEventListener('blur', clearCachedValue)
+            return
+          }
+          // 处理小数点
+          if (this.cachedValue) {
+            if (this.cachedValue.indexOf('.') !== -1) {
+              // 删除到小数点时
+              if (
+                $event.data !== '.' &&
+                $event.inputType === 'deleteContentBackward'
+              ) {
+                const dotIndex = this.cachedValue.indexOf('.')
+                this.cachedValue =
+                  $event.target.value =
+                  this.valueSync =
+                  this.cachedValue.slice(0, dotIndex)
+                return this.$triggerInput($event, {
+                  value: this.valueSync
+                }, force)
+              }
+            } else if ($event.data === '.') {
+              // 输入小数点时
+              this.cachedValue += '.'
+              this.__clearCachedValue = () => {
+                this.cachedValue = this.valueSync = $event.target.value = this.cachedValue.slice(0, -1)
+              }
+              $event.target.addEventListener('blur', this.__clearCachedValue)
+              return false
+            }
+          }
+          this.cachedValue = this.valueSync = $event.target.value = this.cachedValue === '-' ? '' : this.cachedValue
           // 输入非法字符不触发 input 事件
           return
         } else {
           this.cachedValue = this.valueSync
-        } */
-      }
-
-      // type="number" 不支持 maxlength 属性，因此需要主动限制长度。
-      if (this.inputType === 'number') {
-        const maxlength = parseInt(this.maxlength, 10)
-        if (maxlength > 0 && $event.target.value.length > maxlength) {
-          $event.target.value = $event.target.value.slice(0, maxlength)
-          this.valueSync = $event.target.value
-          // 字符长度超出范围不触发 input 事件
-          return
         }
       }
+
+      if (outOfMaxlength) return
+
+      this.valueSync = this.$refs.input.value
+
       this.$triggerInput($event, {
         value: this.valueSync
       }, force)
     },
     _onComposition ($event) {
-      if ($event.type === 'compositionstart') {
-        this.composing = true
-      } else if (this.composing) {
-        this.composing = false
-        // 部分输入法 compositionend 事件可能晚于 input
-        this._onInput($event)
+      switch ($event.type) {
+        case 'compositionstart':
+          this.composing = true
+          break
+        case 'compositionend':
+          if (this.composing) {
+            this.composing = false
+            // 部分输入法 compositionend 事件可能晚于 input
+            this._onInput($event)
+          }
+          break
       }
+
+      !this.ignoreCompositionEvent &&
+        this.$trigger($event.type, $event, { data: $event.data })
     },
     _resetFormData () {
       this.valueSync = ''
@@ -299,7 +397,8 @@ uni-input[hidden] {
   text-shadow: inherit;
 }
 
-.uni-input-input[type="search"]::-webkit-search-cancel-button {
+.uni-input-input[type="search"]::-webkit-search-cancel-button,
+.uni-input-input[type="search"]::-webkit-search-decoration {
   display: none;
 }
 

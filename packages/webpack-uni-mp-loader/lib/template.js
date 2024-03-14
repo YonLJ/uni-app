@@ -66,7 +66,9 @@ module.exports = function (content, map) {
     Object.assign(vueLoaderOptions.options.compilerOptions, {
       mp: {
         platform: process.env.UNI_PLATFORM,
-        betterScopedSlots: process.env.BETTER_SCOPED_SLOTS
+        scopedSlotsCompiler: process.env.SCOPED_SLOTS_COMPILER,
+        slotMultipleInstance: process.env.SLOT_MULTIPLE_INSTANCE === 'true',
+        mergeVirtualHostAttributes: process.env.MERGE_VIRTUAL_HOST_ATTRIBUTES === 'true'
       },
       filterModules,
       filterTagName,
